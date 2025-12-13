@@ -121,5 +121,5 @@ pip install matplotlib numpy pandas
 
 ---
 
-**Author**: Seokjun Ryu, Computer Architecture Team Project 3조
+**Author**: Computer Architecture Team Project 3조
 **Date**: 2025.12
