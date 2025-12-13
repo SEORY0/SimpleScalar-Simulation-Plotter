@@ -117,7 +117,7 @@ pip install matplotlib numpy pandas
 
 - 결과 파일은 SimpleScalar의 stderr 출력을 리다이렉션(`2>`)해서 생성해야 합니다
 - 모든 벤치마크(gcc, go, mcf, gzip)에 대해 동일한 실험을 수행해야 합니다
-- baseline.cfg를 기준으로 한 가지 파라미터만 변경하며 실험해야 합니다
+- baseline.cfg를 기준으로 한 가지 파라미터만 변경하며 실험해야 합니다.
 
 ---
 
