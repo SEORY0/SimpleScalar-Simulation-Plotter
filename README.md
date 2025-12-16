@@ -9,6 +9,7 @@
 
 - `get_ipc_enhanced.py`: 메인 분석 스크립트
 - `generate_sample_data.py`: 테스트용 샘플 데이터 생성기
+- `section6_final_graph.py`: 6번 항목 waterfall 그래프 생성
 - `Graph_*.png`: 생성된 샘플 그래프들
 
 ### 🚀 사용 방법
