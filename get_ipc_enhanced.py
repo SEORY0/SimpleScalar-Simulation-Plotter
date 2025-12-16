@@ -1,13 +1,12 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 ================================================================================
 SimpleScalar Simulation Result Analyzer
 ================================================================================
 Computer Architecture Project - Architectural Simulation Analysis Tool
-숭실대학교 컴퓨터구조 팀 프로젝트용 자동화 분석 도구
+숭실대학교 전자정보공학부 IT융합전공 컴퓨터구조 팀 프로젝트용 자동화 분석 도구
 
-Author: Team XX
+Author: Seokjun RYU, Team 3
 Date: 2025.12
 
 이 스크립트는 SimpleScalar 시뮬레이션 결과 파일(.txt)을 파싱하여
@@ -45,7 +44,7 @@ warnings.filterwarnings('ignore')
 # 1. 스타일 및 설정
 # ==========================================
 
-# 전문적인 학술 스타일 설정
+# 학술 스타일 설정
 plt.style.use('seaborn-v0_8-whitegrid')
 plt.rcParams.update({
     'font.family': 'DejaVu Sans',
@@ -945,9 +944,219 @@ def run_section_4_3(df):
     )
 
 
+def create_full_heatmap(df, bsize_values, assoc_values, repl_values, filename):
+    """
+    4개 Application × 3개 Replacement Policy = 12개 서브플롯 히트맵
+    행: Application (GCC, GO, MCF, GZIP)
+    열: Replacement Policy (LRU, FIFO, Random)
+    """
+    fig, axes = plt.subplots(4, 3, figsize=(14, 16))
+    
+    repl_names = {'l': 'LRU', 'f': 'FIFO', 'r': 'Random'}
+    
+    # 전체 데이터에서 Application별 최대/최소값 찾기 (각 행별로 컬러스케일 통일)
+    bench_ranges = {}
+    for bench in BENCHMARKS:
+        bench_df = df[df['benchmark'] == bench]
+        all_ipcs = bench_df['sim_IPC'].dropna().tolist()
+        if all_ipcs:
+            bench_ranges[bench] = (min(all_ipcs), max(all_ipcs))
+        else:
+            bench_ranges[bench] = (0, 1)
+    
+    best_configs = {}
+    
+    for row_idx, bench in enumerate(BENCHMARKS):
+        bench_df = df[df['benchmark'] == bench]
+        vmin, vmax = bench_ranges[bench]
+        
+        best_config = {'ipc': 0, 'bsize': 0, 'assoc': 0, 'repl': ''}
+        
+        for col_idx, repl in enumerate(repl_values):
+            ax = axes[row_idx, col_idx]
+            
+            # 히트맵 데이터 구성
+            heatmap_data = np.full((len(assoc_values), len(bsize_values)), np.nan)
+            
+            for i, assoc in enumerate(assoc_values):
+                for j, bsize in enumerate(bsize_values):
+                    row = bench_df[(bench_df['dl1_bsize'] == bsize) & 
+                                  (bench_df['dl1_assoc'] == assoc) & 
+                                  (bench_df['dl1_repl'] == repl)]
+                    if not row.empty:
+                        ipc = row['sim_IPC'].max()
+                        heatmap_data[i, j] = ipc
+                        if ipc > best_config['ipc']:
+                            best_config = {'ipc': ipc, 'bsize': bsize, 'assoc': assoc, 'repl': repl}
+            
+            # 히트맵 그리기
+            im = ax.imshow(heatmap_data, cmap='YlOrRd', aspect='auto', vmin=vmin, vmax=vmax)
+            
+            # 축 설정
+            ax.set_xticks(np.arange(len(bsize_values)))
+            ax.set_yticks(np.arange(len(assoc_values)))
+            ax.set_xticklabels([f'{v}B' for v in bsize_values], fontsize=9)
+            ax.set_yticklabels([f'{v}-way' for v in assoc_values], fontsize=9)
+            
+            # 값 표시
+            for i in range(len(assoc_values)):
+                for j in range(len(bsize_values)):
+                    if not np.isnan(heatmap_data[i, j]):
+                        text_color = 'white' if heatmap_data[i, j] > (vmin + vmax) / 2 else 'black'
+                        ax.text(j, i, f'{heatmap_data[i, j]:.3f}',
+                               ha='center', va='center', color=text_color, 
+                               fontweight='bold', fontsize=8)
+            
+            # 첫 번째 행에만 Replacement Policy 제목
+            if row_idx == 0:
+                ax.set_title(f'{repl_names[repl]}', fontweight='bold', fontsize=12)
+            
+            # 첫 번째 열에만 Application 이름 (Y축 라벨)
+            if col_idx == 0:
+                ax.set_ylabel(f'{BENCHMARK_DISPLAY[bench]}', fontweight='bold', fontsize=11)
+            
+            # 마지막 행에만 X축 라벨
+            if row_idx == len(BENCHMARKS) - 1:
+                ax.set_xlabel('Block Size', fontsize=10)
+        
+        # 각 Application의 최적 config 저장
+        if best_config['ipc'] > 0:
+            best_configs[bench] = best_config
+        
+        # 각 행 끝에 컬러바 추가 (오른쪽으로 더 이동)
+        cbar = fig.colorbar(im, ax=axes[row_idx, :], fraction=0.02, pad=0.05)
+        cbar.set_label('IPC', fontsize=9)
+    
+    fig.suptitle('5-1. IPC Heatmap: Block Size × Associativity × Replacement Policy',
+                 fontweight='bold', fontsize=14, y=0.98)
+    
+    plt.tight_layout(rect=[0, 0, 0.88, 0.96])
+    plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+    print(f"✅ Generated: {filename}")
+    plt.close()
+    
+    return best_configs
+
+
+def create_summary_table(best_configs, filename):
+    """
+    모든 Application의 최적 configuration 요약 테이블 생성
+    """
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.axis('off')
+    
+    repl_names = {'l': 'LRU', 'f': 'FIFO', 'r': 'Random'}
+    
+    # 테이블 데이터 구성
+    table_data = []
+    for bench in BENCHMARKS:
+        if bench in best_configs and best_configs[bench]:
+            cfg = best_configs[bench]
+            table_data.append([
+                BENCHMARK_DISPLAY[bench],
+                f"{cfg['bsize']}B",
+                f"{cfg['assoc']}-way",
+                repl_names.get(cfg['repl'], cfg['repl']),
+                f"{cfg['ipc']:.4f}"
+            ])
+        else:
+            table_data.append([BENCHMARK_DISPLAY[bench], '-', '-', '-', '-'])
+    
+    # 테이블 생성
+    columns = ['Application', 'Block Size', 'Associativity', 'Replacement', 'Best IPC']
+    
+    table = ax.table(cellText=table_data,
+                     colLabels=columns,
+                     cellLoc='center',
+                     loc='center',
+                     colWidths=[0.18, 0.18, 0.18, 0.18, 0.18])
+    
+    # 스타일 설정
+    table.auto_set_font_size(False)
+    table.set_fontsize(12)
+    table.scale(1.2, 2)
+    
+    # 헤더 스타일
+    for i in range(len(columns)):
+        table[(0, i)].set_facecolor('#2E86AB')
+        table[(0, i)].set_text_props(color='white', fontweight='bold')
+    
+    # 데이터 행 스타일
+    colors = ['#f0f0f0', '#ffffff']
+    for i in range(len(table_data)):
+        for j in range(len(columns)):
+            table[(i+1, j)].set_facecolor(colors[i % 2])
+            if j == 4:  # IPC 열 강조
+                table[(i+1, j)].set_text_props(fontweight='bold', color='#C73E1D')
+    
+    ax.set_title('5-2. Optimal Cache Configuration Summary\n(Block Size × Associativity × Replacement Policy)',
+                 fontweight='bold', fontsize=14, pad=20)
+    
+    plt.tight_layout()
+    plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+    print(f"✅ Generated: {filename}")
+    plt.close()
+
+
+def create_summary_bar_chart(best_configs, filename):
+    """
+    최적 configuration 비교 막대 그래프
+    """
+    fig, ax = plt.subplots(figsize=(12, 7))
+    
+    repl_names = {'l': 'LRU', 'f': 'FIFO', 'r': 'Random'}
+    
+    benchmarks = []
+    ipcs = []
+    labels = []
+    
+    for bench in BENCHMARKS:
+        if bench in best_configs and best_configs[bench]:
+            cfg = best_configs[bench]
+            benchmarks.append(BENCHMARK_DISPLAY[bench])
+            ipcs.append(cfg['ipc'])
+            labels.append(f"{cfg['bsize']}B\n{cfg['assoc']}-way\n{repl_names.get(cfg['repl'], cfg['repl'])}")
+    
+    if not benchmarks:
+        print("⚠️ No data for summary bar chart")
+        plt.close()
+        return
+    
+    x = np.arange(len(benchmarks))
+    bars = ax.bar(x, ipcs, color=COLORS['accent'][:len(benchmarks)], 
+                  edgecolor='white', linewidth=2, alpha=0.9)
+    
+    # 값과 configuration 표시
+    for i, (bar, ipc, label) in enumerate(zip(bars, ipcs, labels)):
+        # IPC 값
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
+                f'{ipc:.4f}', ha='center', va='bottom', fontweight='bold', fontsize=11)
+        # Configuration
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height()/2,
+                label, ha='center', va='center', fontweight='bold', 
+                fontsize=9, color='white')
+    
+    ax.set_xlabel('Benchmark', fontweight='bold', fontsize=12)
+    ax.set_ylabel('IPC (Instructions Per Cycle)', fontweight='bold', fontsize=12)
+    ax.set_title('5-3. Optimal Cache Configuration Comparison', fontweight='bold', fontsize=14)
+    ax.set_xticks(x)
+    ax.set_xticklabels(benchmarks, fontweight='bold')
+    ax.set_ylim(0, max(ipcs) * 1.2 if ipcs else 1)
+    ax.yaxis.grid(True, linestyle='--', alpha=0.7)
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+    print(f"✅ Generated: {filename}")
+    plt.close()
+
+
 def run_section_5(df):
     """
     ⑤ 최적 Cache Configuration 탐색
+    Block Size × Associativity × Replacement Policy 조합 분석
     """
     print("\n📊 Section 5: Optimal Cache Configuration")
     
@@ -958,25 +1167,36 @@ def run_section_5(df):
         print("⚠️ No complete Cache configuration data found")
         return
     
-    create_comparison_chart(
-        cache_df, None,
-        title='5. Cache Configuration Optimization: Baseline vs Optimized',
-        filename='Graph_5_CacheOpt.png'
+    # 사용 가능한 값들 추출
+    bsize_values = sorted(cache_df['dl1_bsize'].dropna().unique())
+    assoc_values = sorted(cache_df['dl1_assoc'].dropna().unique())
+    repl_values = [r for r in ['l', 'f', 'r'] if r in cache_df['dl1_repl'].unique()]
+    
+    # 타겟 값들 (프로젝트 요구사항)
+    target_bsize = [v for v in [16, 32, 64, 128] if v in bsize_values]
+    target_assoc = [v for v in [1, 2, 4] if v in assoc_values]
+    
+    if not target_bsize:
+        target_bsize = bsize_values[:4]
+    if not target_assoc:
+        target_assoc = assoc_values[:3]
+    if not repl_values:
+        repl_values = ['l']
+    
+    print(f"   Block sizes: {target_bsize}")
+    print(f"   Associativity: {target_assoc}")
+    print(f"   Replacement: {repl_values}")
+    
+    # 4x3 히트맵 생성 (Application × Replacement Policy)
+    best_configs = create_full_heatmap(
+        cache_df, target_bsize, target_assoc, repl_values,
+        'Graph_5_1_Heatmap.png'
     )
     
-    # 히트맵 생성 (Block Size x Associativity)
-    bsize_values = sorted(cache_df['dl1_bsize'].dropna().unique())[:4]
-    assoc_values = sorted(cache_df['dl1_assoc'].dropna().unique())[:4]
-    
-    if len(bsize_values) > 1 and len(assoc_values) > 1:
-        create_heatmap(
-            cache_df, 'dl1_bsize', 'dl1_assoc',
-            bsize_values, assoc_values,
-            title='5-1. IPC Heatmap: Block Size × Associativity',
-            filename='Graph_5_1_Heatmap.png',
-            x_label_map={v: f'{v}B' for v in bsize_values},
-            y_label_map={v: f'{v}-way' for v in assoc_values}
-        )
+    # 요약 테이블 및 막대그래프 생성
+    if best_configs:
+        create_summary_table(best_configs, 'Graph_5_2_Summary_Table.png')
+        create_summary_bar_chart(best_configs, 'Graph_5_3_Summary_Bar.png')
 
 
 def run_section_6(df):
